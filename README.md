@@ -21,7 +21,8 @@ files.
 bench --site SITE_NAME install-app fikrity_workspaces
 ```
 
-Installation imports 32 workspaces and 3 related dashboard charts. The prior
+Installation imports 32 workspaces plus all of their bundled widget
+dependencies (currently 27 dashboard charts and 12 number cards). The prior
 state of those records is retained in the single `Fikrity Workspace Settings`
 document for recovery/audit purposes.
 

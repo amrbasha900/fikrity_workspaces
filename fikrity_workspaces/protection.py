@@ -5,16 +5,10 @@ import json
 import frappe
 
 from fikrity_workspaces.bundle import (
-	MANAGED_DASHBOARD_CHARTS,
-	MANAGED_WORKSPACES,
 	_import_document,
 	capture_current_state,
+	get_managed_document_names,
 )
-
-MANAGED_DOCUMENTS = {
-	"Workspace": set(MANAGED_WORKSPACES),
-	"Dashboard Chart": set(MANAGED_DASHBOARD_CHARTS),
-}
 
 
 def before_migrate() -> None:
@@ -44,6 +38,7 @@ def after_migrate() -> None:
 		return
 
 	snapshot = json.loads(settings.pending_migration_snapshot)
+	managed_documents = get_managed_document_names()
 	for doctype, documents in snapshot.get("documents", {}).items():
 		for document in documents:
 			_import_document(document)
@@ -51,7 +46,7 @@ def after_migrate() -> None:
 		# A deletion is a customer change too. Standard app sync can recreate a
 		# deleted managed record; remove it again when it was absent before migrate.
 		snapshot_names = {document["name"] for document in documents}
-		for name in MANAGED_DOCUMENTS.get(doctype, set()) - snapshot_names:
+		for name in managed_documents.get(doctype, set()) - snapshot_names:
 			if frappe.db.exists(doctype, name):
 				frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
 

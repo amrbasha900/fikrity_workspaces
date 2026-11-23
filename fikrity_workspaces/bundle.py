@@ -8,7 +8,7 @@ import frappe
 from frappe.modules.import_file import import_doc
 from frappe.utils import now_datetime
 
-BUNDLE_VERSION = "1"
+BUNDLE_VERSION = "2"
 BUNDLE_PATH = Path(__file__).with_name("data") / "workspace_bundle.json"
 
 # Public workspaces created on demo.fikrity.com.  They have no source file in
@@ -55,11 +55,14 @@ CHANGED_STANDARD_WORKSPACES = (
 )
 
 MANAGED_WORKSPACES = CUSTOM_WORKSPACES + CHANGED_STANDARD_WORKSPACES
-MANAGED_DASHBOARD_CHARTS = (
-	"Incoming Bills (Purchase Invoice)",
-	"Outgoing Bills (Sales Invoice)",
-	"Profit and Loss",
-)
+ALWAYS_BUNDLED_DOCUMENTS = {
+	"Dashboard Chart": {
+		"Incoming Bills (Purchase Invoice)",
+		"Outgoing Bills (Sales Invoice)",
+		"Profit and Loss",
+	},
+}
+BUNDLED_DEPENDENCY_DOCTYPES = {"Dashboard Chart", "Number Card", "Custom HTML Block"}
 ALLOWED_APPS = {"frappe", "erpnext", "hrms"}
 
 
@@ -94,6 +97,22 @@ def _workspace_dependencies(workspace: dict):
 	for row in workspace.get("custom_blocks") or []:
 		if row.get("custom_block_name"):
 			yield "custom_blocks", row, "Custom HTML Block", row["custom_block_name"]
+
+	# Some edited workspaces contain a widget block in `content` without the
+	# matching child-table row. The desk still renders from content, so include
+	# those widgets as dependencies as well.
+	content_dependencies = {
+		"chart": ("charts", "Dashboard Chart", "chart_name"),
+		"number_card": ("number_cards", "Number Card", "number_card_name"),
+		"custom_block": ("custom_blocks", "Custom HTML Block", "custom_block_name"),
+	}
+	for block in json.loads(workspace.get("content") or "[]"):
+		dependency = content_dependencies.get(block.get("type"))
+		if not dependency:
+			continue
+		fieldname, doctype, target_key = dependency
+		if target := block.get("data", {}).get(target_key):
+			yield fieldname, block, doctype, target
 
 
 def _recount_link_groups(links: list[dict]) -> None:
@@ -134,9 +153,12 @@ def _clean_workspace_links(workspace: dict) -> None:
 	_recount_link_groups(cleaned)
 
 
-def _remove_external_dependencies(workspace: dict) -> None:
+def _remove_unsupported_dependencies(workspace: dict) -> None:
 	removals: dict[str, set[str]] = {}
 	for fieldname, _row, doctype, target in _workspace_dependencies(workspace):
+		if not frappe.db.exists(doctype, target):
+			removals.setdefault(fieldname, set()).add(target)
+			continue
 		app_name = _origin_app(doctype, target)
 		if app_name and app_name not in ALLOWED_APPS:
 			removals.setdefault(fieldname, set()).add(target)
@@ -198,12 +220,20 @@ def load_bundle() -> dict:
 def audit_bundle() -> dict:
 	"""Report missing workspace link targets and the apps they come from."""
 	bundle = load_bundle()
+	provided = {
+		doctype: {document["name"] for document in documents}
+		for doctype, documents in bundle.get("documents", {}).items()
+	}
 	missing: list[dict] = []
 	apps: set[str] = set()
 	external_links: list[dict] = []
 
 	for workspace in bundle.get("documents", {}).get("Workspace", []):
 		for fieldname, _row, target_doctype, target in _workspace_dependencies(workspace):
+			# Widgets shipped inside this bundle do not need to exist on the target
+			# before installation; they are imported before the workspaces.
+			if target in provided.get(target_doctype, set()):
+				continue
 			if not frappe.db.exists(target_doctype, target):
 				missing.append(
 					{
@@ -241,23 +271,50 @@ def _document_payload(doctype: str, name: str) -> dict | None:
 	return doc
 
 
+def _capture_named_documents(document_names: dict[str, set[str]]) -> dict[str, list[dict]]:
+	return {
+		doctype: [doc for name in sorted(names) if (doc := _document_payload(doctype, name)) is not None]
+		for doctype, names in document_names.items()
+	}
+
+
+def get_managed_document_names() -> dict[str, set[str]]:
+	"""Return every record name owned by the installed bundle."""
+	return {
+		doctype: {document["name"] for document in documents}
+		for doctype, documents in load_bundle().get("documents", {}).items()
+	}
+
+
 def capture_current_state() -> dict:
-	"""Return an exact, JSON-serialisable snapshot of managed records."""
+	"""Snapshot the target site's current state for all bundle-owned records."""
 	return {
 		"captured_at": str(now_datetime()),
 		"bundle_version": BUNDLE_VERSION,
-		"documents": {
-			"Workspace": [
-				doc
-				for name in MANAGED_WORKSPACES
-				if (doc := _document_payload("Workspace", name)) is not None
-			],
-			"Dashboard Chart": [
-				doc
-				for name in MANAGED_DASHBOARD_CHARTS
-				if (doc := _document_payload("Dashboard Chart", name)) is not None
-			],
-		},
+		"documents": _capture_named_documents(get_managed_document_names()),
+	}
+
+
+def capture_source_state() -> dict:
+	"""Build a distributable baseline, including every referenced widget."""
+	workspaces = [
+		doc for name in MANAGED_WORKSPACES if (doc := _document_payload("Workspace", name)) is not None
+	]
+	for workspace in workspaces:
+		_remove_unsupported_dependencies(workspace)
+
+	document_names = {doctype: set(names) for doctype, names in ALWAYS_BUNDLED_DOCUMENTS.items()}
+	for workspace in workspaces:
+		for _fieldname, _row, doctype, target in _workspace_dependencies(workspace):
+			if doctype in BUNDLED_DEPENDENCY_DOCTYPES:
+				document_names.setdefault(doctype, set()).add(target)
+
+	documents = _capture_named_documents(document_names)
+	documents["Workspace"] = workspaces
+	return {
+		"captured_at": str(now_datetime()),
+		"bundle_version": BUNDLE_VERSION,
+		"documents": documents,
 	}
 
 
@@ -268,10 +325,8 @@ def export_bundle() -> str:
 	migrate, so a customer's changes cannot leak back into the distributed
 	baseline.
 	"""
-	payload = capture_current_state()
+	payload = capture_source_state()
 	payload["source_site"] = frappe.local.site
-	for workspace in payload["documents"]["Workspace"]:
-		_remove_external_dependencies(workspace)
 	BUNDLE_PATH.parent.mkdir(parents=True, exist_ok=True)
 	with BUNDLE_PATH.open("w", encoding="utf-8") as bundle_file:
 		json.dump(payload, bundle_file, ensure_ascii=False, indent=2, sort_keys=True, default=str)
