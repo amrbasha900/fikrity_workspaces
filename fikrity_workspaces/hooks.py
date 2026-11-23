@@ -8,7 +8,7 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["erpnext", "hrms"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -83,7 +83,13 @@ app_license = "mit"
 # ------------
 
 # before_install = "fikrity_workspaces.install.before_install"
-# after_install = "fikrity_workspaces.install.after_install"
+after_install = "fikrity_workspaces.install.after_install"
+
+# Keep the site's current version of managed workspaces around standard app
+# synchronisation.  This protects customer edits from later ERPNext/HRMS
+# workspace JSON updates without re-applying our original bundle.
+before_migrate = "fikrity_workspaces.protection.before_migrate"
+after_migrate = "fikrity_workspaces.protection.after_migrate"
 
 # Uninstallation
 # ------------
@@ -246,4 +252,3 @@ app_license = "mit"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

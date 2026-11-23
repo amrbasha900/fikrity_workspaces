@@ -1,0 +1,58 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-11-24 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "installed_bundle_version",
+  "installed_on",
+  "pending_migration_snapshot",
+  "preinstall_snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "installed_bundle_version",
+   "fieldtype": "Data",
+   "label": "Installed Bundle Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "installed_on",
+   "fieldtype": "Datetime",
+   "label": "Installed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pending_migration_snapshot",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Pending Migration Snapshot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "preinstall_snapshot",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Preinstall Snapshot",
+   "read_only": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Fikrity Workspaces",
+ "name": "Fikrity Workspace Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
